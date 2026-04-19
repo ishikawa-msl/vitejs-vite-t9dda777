@@ -13,6 +13,7 @@ const Icon = ({ name, size = 20, className = "" }: any) => {
     hash: (<><line x1="4" y1="9" x2="20" y2="9" /><line x1="4" y1="15" x2="20" y2="15" /><line x1="10" y1="3" x2="8" y2="21" /><line x1="16" y1="3" x2="14" y2="21" /></>),
     camera: (<><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></>),
     refresh: (<><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></>),
+    loader: (<><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></>),
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -22,6 +23,7 @@ const Icon = ({ name, size = 20, className = "" }: any) => {
 };
 
 export default function App() {
+  const [isReady, setIsReady] = useState(false);
   const [formData, setFormData] = useState<any>({
     orderId: "", supplier: "", issues: [], otherNote: "", jan: "", model: "", quantity: ""
   });
@@ -34,18 +36,37 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const apiKey = ""; // 実行環境から自動提供されます
+  const apiKey = ""; // 実行環境から自動提供
   const SPREADSHEET_GAS_URL = "https://script.google.com/a/macros/mitsui-soko-lg.com/s/AKfycbxqABK9uxF_v12bwzQ5xo13MaYQzly_5C35y6TclY5M3P4p_9oH33QWreXmY3W4/exec"; 
 
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = "https://unpkg.com/html5-qrcode";
-    script.async = true;
-    document.body.appendChild(script);
+    // 外部スクリプトのロード
+    const loadScripts = async () => {
+      // html5-qrcode
+      if (!document.getElementById('html5-qrcode-script')) {
+        const script = document.createElement('script');
+        script.id = 'html5-qrcode-script';
+        script.src = "https://unpkg.com/html5-qrcode";
+        document.body.appendChild(script);
+      }
 
-    const tailwind = document.createElement('script');
-    tailwind.src = "https://cdn.tailwindcss.com";
-    document.head.appendChild(tailwind);
+      // Tailwind
+      if (!document.getElementById('tailwind-script')) {
+        const tailwind = document.createElement('script');
+        tailwind.id = 'tailwind-script';
+        tailwind.src = "https://cdn.tailwindcss.com";
+        document.head.appendChild(tailwind);
+        
+        // Tailwindのロード完了を待つ
+        tailwind.onload = () => {
+          setTimeout(() => setIsReady(true), 500);
+        };
+      } else {
+        setIsReady(true);
+      }
+    };
+
+    loadScripts();
   }, []);
 
   const updateField = (field: string, value: any) => {
@@ -53,8 +74,7 @@ export default function App() {
   };
 
   /**
-   * Gemini APIを使用した画像解析（文字読み取り）
-   * 指示：指数バックオフによるリトライ実装
+   * Gemini APIを使用した画像解析
    */
   const analyzeImageWithGemini = async (base64Data: string) => {
     const systemPrompt = "あなたは物流倉庫の検品アシスタントです。提供された画像から、商品の『型番（モデル番号）』のみを抽出してください。余計な説明は省き、型番の文字列だけを返してください。判別できない場合は「読み取り不可」とだけ返してください。";
@@ -84,9 +104,7 @@ export default function App() {
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
         
         const result = await response.json();
-        const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (!text) throw new Error("解析結果が空です");
-        return text;
+        return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "読み取り不可";
       } catch (error: any) {
         if (retryCount < 5) {
           const delay = Math.pow(2, retryCount) * 1000;
@@ -101,7 +119,7 @@ export default function App() {
   };
 
   /**
-   * 写真を撮影してAIで解析（型番用）
+   * 型番写真の解析実行
    */
   const captureAndAnalyze = async () => {
     if (!videoRef.current || !canvasRef.current || isAnalyzing) return;
@@ -113,29 +131,26 @@ export default function App() {
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
-      // ビデオが有効なサイズを持っているか確認
-      if (video.videoWidth === 0 || video.videoHeight === 0) {
-        throw new Error("カメラ映像の準備ができていません。少し待ってから再度押してください。");
+      if (video.videoWidth === 0) {
+        throw new Error("カメラ準備中...再度ボタンを押してください");
       }
 
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error("Canvasコンテキストの取得に失敗しました");
-      
-      ctx.drawImage(video, 0, 0);
+      ctx?.drawImage(video, 0, 0);
       
       const base64Image = canvas.toDataURL('image/png').split(',')[1];
       const detectedText = await analyzeImageWithGemini(base64Image);
       
       if (detectedText === "読み取り不可") {
-        setCameraError("AIが型番を判別できませんでした。もっと近づけるか、明るい場所で撮り直してください。");
+        setCameraError("AIが型番を判別できませんでした。ピントを合わせて撮り直してください。");
       } else {
         updateField('model', detectedText);
         handleStopScan();
       }
     } catch (e: any) {
-      setCameraError(`エラー: ${e.message || "解析に失敗しました"}`);
+      setCameraError(`解析エラー: ${e.message}`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -150,7 +165,7 @@ export default function App() {
       setTimeout(() => {
         // @ts-ignore
         if (typeof Html5Qrcode === 'undefined') {
-          setCameraError("システム準備中...もう一度押してください");
+          setCameraError("システム準備中...5秒ほど待ってから再度お試しください");
           return;
         }
         try {
@@ -177,28 +192,24 @@ export default function App() {
             () => {} 
           ).catch((err: any) => setCameraError("カメラ起動エラー: " + err));
         } catch (e) {
-          setCameraError("エラーが発生しました");
+          setCameraError("エラーが発生しました。");
         }
-      }, 500);
+      }, 800);
     } else {
-      // 型番はAIカメラ（文字認識）
+      // 型番 AIカメラ
       setTimeout(async () => {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { 
-              facingMode: "environment",
-              width: { ideal: 1280 },
-              height: { ideal: 720 }
-            } 
+            video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } 
           });
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
             scannerRef.current = stream; 
           }
         } catch (err: any) {
-          setCameraError("カメラの権限が拒否されたか、利用できません。");
+          setCameraError("カメラへのアクセスを許可してください。");
         }
-      }, 300);
+      }, 500);
     }
   };
 
@@ -245,7 +256,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      alert("送信完了！スプレッドシートをご確認ください。");
+      alert("送信完了！");
       setFormData({ orderId: "", supplier: "", issues: [], otherNote: "", jan: "", model: "", quantity: "" });
     } catch (e) {
       alert("送信エラーが発生しました。");
@@ -261,6 +272,16 @@ export default function App() {
     updateField('issues', issues);
   };
 
+  // チラツキ防止：ロード中画面
+  if (!isReady) {
+    return (
+      <div className="fixed inset-0 bg-slate-50 flex flex-col items-center justify-center space-y-4">
+        <Icon name="loader" size={48} className="text-blue-600 animate-spin" />
+        <p className="text-slate-400 font-bold text-sm">システムを起動しています...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-40 font-sans overflow-x-hidden relative">
       <header className="bg-white border-b border-slate-200 p-4 sticky top-0 z-30 shadow-sm flex items-center gap-2">
@@ -271,6 +292,7 @@ export default function App() {
       </header>
 
       <main className="max-w-md mx-auto p-5 space-y-8 animate-in fade-in duration-500">
+        {/* 基本情報 */}
         <section className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-5">
           <div className="space-y-1.5">
             <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 tracking-wider">発注ID</label>
@@ -282,6 +304,7 @@ export default function App() {
           </div>
         </section>
 
+        {/* スキャン */}
         <section className="space-y-3">
           {['JANコード', '型番'].map(f => (
             <div key={f} className="bg-white rounded-2xl border border-slate-200 p-4 flex justify-between items-center shadow-sm hover:border-blue-200 transition-all">
@@ -300,6 +323,7 @@ export default function App() {
           </div>
         </section>
 
+        {/* 不備内容 */}
         <section className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-4">
           <div className="grid grid-cols-2 gap-2">
             {["数量違い", "破損", "納品書なし", "その他"].map(l => (
@@ -307,7 +331,7 @@ export default function App() {
             ))}
           </div>
           {formData.issues.includes("その他") && (
-            <textarea value={formData.otherNote} onChange={(e)=>updateField('otherNote', e.target.value)} className="w-full mt-2 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm h-32 outline-none focus:bg-white shadow-inner resize-none transition-all text-slate-800" placeholder="不備の詳細を自由に入力してください" />
+            <textarea value={formData.otherNote} onChange={(e)=>updateField('otherNote', e.target.value)} className="w-full mt-2 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm h-32 outline-none focus:bg-white shadow-inner resize-none transition-all text-slate-800" placeholder="不備の詳細を具体的に記入してください" />
           )}
         </section>
 
@@ -342,8 +366,8 @@ export default function App() {
             {isAnalyzing && (
               <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center backdrop-blur-sm">
                 <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-6"></div>
-                <p className="text-white text-lg font-black tracking-widest animate-pulse">AIが文字を解析中...</p>
-                <p className="text-white/60 text-xs mt-2">数秒かかります。そのままお待ちください</p>
+                <p className="text-white text-lg font-black tracking-widest animate-pulse uppercase">AI Analyzing...</p>
+                <p className="text-white/60 text-xs mt-2">文字を解析しています。動かさないでください</p>
               </div>
             )}
           </div>
@@ -359,7 +383,7 @@ export default function App() {
           <div className="mt-8 flex flex-col items-center gap-4">
             <p className="text-white text-sm font-bold tracking-widest uppercase flex items-center gap-2">
               <span className="w-2 h-2 bg-red-500 rounded-full animate-ping"></span>
-              {scanField}を読み取り中
+              {scanField}読取中
             </p>
 
             {scanField === "型番" && !isAnalyzing && (
@@ -367,15 +391,15 @@ export default function App() {
                 onClick={captureAndAnalyze}
                 className="bg-white text-slate-900 px-10 py-5 rounded-full font-black shadow-2xl active:scale-95 transition-all flex items-center gap-3 border-4 border-blue-500/20"
               >
-                <Icon name="camera" size={24} /> シャッターを切る
+                <Icon name="camera" size={24} /> 文字を読み取る
               </button>
             )}
 
             <button 
               onClick={handleStopScan}
-              className="text-white/40 text-xs underline mt-4 hover:text-white transition-colors"
+              className="text-white/40 text-xs underline mt-4"
             >
-              キャンセルして戻る
+              スキャンを終了する
             </button>
           </div>
         </div>
