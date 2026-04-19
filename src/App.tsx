@@ -54,9 +54,10 @@ export default function App() {
 
   /**
    * Gemini APIを使用した画像解析（文字読み取り）
+   * 指示：指数バックオフによるリトライ実装
    */
   const analyzeImageWithGemini = async (base64Data: string) => {
-    const systemPrompt = "あなたは物流倉庫の検品アシスタントです。提供された画像から、商品の『型番（モデル番号）』のみを抽出してください。余計な説明は省き、型番の文字列だけを返してください。";
+    const systemPrompt = "あなたは物流倉庫の検品アシスタントです。提供された画像から、商品の『型番（モデル番号）』のみを抽出してください。余計な説明は省き、型番の文字列だけを返してください。判別できない場合は「読み取り不可」とだけ返してください。";
     const userQuery = "この画像から型番を読み取ってください。";
     
     const payload = {
@@ -79,9 +80,14 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
+        
+        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+        
         const result = await response.json();
-        return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "読み取り失敗";
-      } catch (error) {
+        const text = result.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (!text) throw new Error("解析結果が空です");
+        return text;
+      } catch (error: any) {
         if (retryCount < 5) {
           const delay = Math.pow(2, retryCount) * 1000;
           await new Promise(resolve => setTimeout(resolve, delay));
@@ -98,26 +104,38 @@ export default function App() {
    * 写真を撮影してAIで解析（型番用）
    */
   const captureAndAnalyze = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
+    if (!videoRef.current || !canvasRef.current || isAnalyzing) return;
     
     setIsAnalyzing(true);
-    setCameraError("AIが文字を解析中...");
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx?.drawImage(video, 0, 0);
-    
-    const base64Image = canvas.toDataURL('image/png').split(',')[1];
+    setCameraError("");
 
     try {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      // ビデオが有効なサイズを持っているか確認
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        throw new Error("カメラ映像の準備ができていません。少し待ってから再度押してください。");
+      }
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error("Canvasコンテキストの取得に失敗しました");
+      
+      ctx.drawImage(video, 0, 0);
+      
+      const base64Image = canvas.toDataURL('image/png').split(',')[1];
       const detectedText = await analyzeImageWithGemini(base64Image);
-      updateField('model', detectedText);
-      handleStopScan();
-    } catch (e) {
-      setCameraError("AI解析に失敗しました。手動で入力してください。");
+      
+      if (detectedText === "読み取り不可") {
+        setCameraError("AIが型番を判別できませんでした。もっと近づけるか、明るい場所で撮り直してください。");
+      } else {
+        updateField('model', detectedText);
+        handleStopScan();
+      }
+    } catch (e: any) {
+      setCameraError(`エラー: ${e.message || "解析に失敗しました"}`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -128,7 +146,6 @@ export default function App() {
     setCameraError("");
     setIsScanning(true);
     
-    // JANコードは従来のバーコードスキャン
     if (field === "JANコード") {
       setTimeout(() => {
         // @ts-ignore
@@ -168,21 +185,24 @@ export default function App() {
       setTimeout(async () => {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment" } 
+            video: { 
+              facingMode: "environment",
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            } 
           });
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
-            scannerRef.current = stream; // 停止用にストリームを保持
+            scannerRef.current = stream; 
           }
-        } catch (err) {
-          setCameraError("カメラの権限が拒否されました");
+        } catch (err: any) {
+          setCameraError("カメラの権限が拒否されたか、利用できません。");
         }
       }, 300);
     }
   };
 
   const handleStopScan = () => {
-    // バーコードスキャンの停止
     if (scannerRef.current && typeof scannerRef.current.stop === 'function') {
       scannerRef.current.stop().then(() => {
         setIsScanning(false);
@@ -192,7 +212,6 @@ export default function App() {
         scannerRef.current = null;
       });
     } 
-    // ビデオストリームの停止（型番用）
     else if (scannerRef.current instanceof MediaStream) {
       scannerRef.current.getTracks().forEach(track => track.stop());
       setIsScanning(false);
@@ -202,6 +221,7 @@ export default function App() {
       setIsScanning(false);
     }
     setCameraError("");
+    setIsAnalyzing(false);
   };
 
   const handleSave = async () => {
@@ -320,16 +340,21 @@ export default function App() {
             </div>
 
             {isAnalyzing && (
-              <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center">
-                <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p className="text-white text-sm font-bold">AIが文字を解析中...</p>
+              <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center backdrop-blur-sm">
+                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+                <p className="text-white text-lg font-black tracking-widest animate-pulse">AIが文字を解析中...</p>
+                <p className="text-white/60 text-xs mt-2">数秒かかります。そのままお待ちください</p>
               </div>
             )}
           </div>
 
           <canvas ref={canvasRef} className="hidden"></canvas>
 
-          {cameraError && <p className="text-red-400 text-xs mt-6 px-4 text-center font-bold">{cameraError}</p>}
+          {cameraError && (
+            <div className="mt-6 bg-red-500/20 border border-red-500/50 p-4 rounded-2xl max-w-sm mx-auto">
+              <p className="text-red-400 text-xs text-center font-bold">{cameraError}</p>
+            </div>
+          )}
           
           <div className="mt-8 flex flex-col items-center gap-4">
             <p className="text-white text-sm font-bold tracking-widest uppercase flex items-center gap-2">
@@ -340,17 +365,17 @@ export default function App() {
             {scanField === "型番" && !isAnalyzing && (
               <button 
                 onClick={captureAndAnalyze}
-                className="bg-white text-slate-900 px-10 py-4 rounded-full font-bold shadow-xl active:scale-95 transition-all flex items-center gap-2"
+                className="bg-white text-slate-900 px-10 py-5 rounded-full font-black shadow-2xl active:scale-95 transition-all flex items-center gap-3 border-4 border-blue-500/20"
               >
-                <Icon name="camera" size={20} /> 写真を撮って文字を読み取る
+                <Icon name="camera" size={24} /> シャッターを切る
               </button>
             )}
 
             <button 
               onClick={handleStopScan}
-              className="text-white/40 text-xs underline mt-4"
+              className="text-white/40 text-xs underline mt-4 hover:text-white transition-colors"
             >
-              スキャンを終了する
+              キャンセルして戻る
             </button>
           </div>
         </div>
