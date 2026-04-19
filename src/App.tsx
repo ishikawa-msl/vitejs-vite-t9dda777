@@ -65,10 +65,18 @@ export default function App() {
         const html5QrCode = new Html5Qrcode("reader");
         scannerRef.current = html5QrCode;
 
-        // 読み取りたいフォーマット（JANコード = EAN_13）を明示的に指定
+        // バーコード（特にJAN）を読み取りやすくするための設定
         const config = { 
-          fps: 15, 
-          qrbox: { width: 280, height: 160 },
+          fps: 15, // 1秒あたりの解析回数
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+            // 画面サイズに合わせて最適な読取エリアを計算
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const qrboxSize = Math.floor(minEdge * 0.7);
+            return {
+              width: qrboxSize,
+              height: Math.floor(qrboxSize * 0.5) // バーコード用に横長にする
+            };
+          },
           aspectRatio: 1.0 
         };
 
@@ -144,7 +152,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-40 font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-40 font-sans overflow-x-hidden">
       <header className="bg-white border-b p-4 sticky top-0 z-30 shadow-sm flex items-center gap-2">
         <div className="bg-blue-600 p-1.5 rounded-lg">
           <Icon name="fileText" size={20} className="text-white" />
@@ -167,7 +175,9 @@ export default function App() {
                 <p className="text-[10px] font-bold text-slate-400 mb-1">{f}</p>
                 <input type="text" value={f === 'JANコード' ? formData.jan : formData.model} onChange={(e)=>updateField(f === 'JANコード' ? 'jan' : 'model', e.target.value)} className="text-sm font-bold w-full bg-transparent outline-none" placeholder="未入力" />
               </div>
-              <button onClick={() => handleStartScan(f)} className="bg-blue-600 text-white px-3 py-2 rounded-xl text-[10px] font-bold shadow-md">スキャン</button>
+              <button onClick={() => handleStartScan(f)} className="bg-blue-600 text-white px-3 py-2 rounded-xl text-[10px] font-bold shadow-md active:scale-95 flex items-center gap-1">
+                <Icon name="scan" size={12} /> スキャン
+              </button>
             </div>
           ))}
           <div className="bg-blue-50 rounded-2xl border border-blue-200 p-4 flex justify-between items-center text-blue-700 shadow-sm">
@@ -194,23 +204,30 @@ export default function App() {
         </div>
       </main>
 
+      {/* スキャン画面 */}
       {isScanning && (
         <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center p-4">
           <div className="absolute top-8 right-8 z-50">
              <button onClick={handleStopScan} className="bg-white/20 p-2 rounded-full text-white"><Icon name="x" size={32} /></button>
           </div>
-          <div className="relative w-full max-w-sm aspect-square bg-zinc-900 rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl">
+          <div className="relative w-full max-w-sm aspect-square bg-zinc-900 rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl flex items-center justify-center">
+            {/* スキャンエンジン表示エリア */}
             <div id="reader" className="w-full h-full"></div>
-            {/* 読み取りガイドの枠 */}
-            <div className="absolute inset-0 pointer-events-none border-[60px] border-black/40 flex items-center justify-center">
-               <div className="w-full h-full border-2 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)] relative">
-                 <div className="absolute top-1/2 left-0 w-full h-0.5 bg-red-500 animate-pulse"></div>
+            
+            {/* 解析範囲を示すオーバーレイガイド（実際の読取エリアに合わせる） */}
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+               <div className="w-[70%] h-[35%] border-2 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.6)] relative rounded-md bg-blue-500/5">
+                 {/* スキャンアニメーション線 */}
+                 <div className="absolute top-1/2 left-0 w-full h-0.5 bg-red-500 shadow-[0_0_10px_rgba(239,68,68,1)] animate-pulse"></div>
                </div>
             </div>
           </div>
-          {cameraError && <p className="text-red-400 text-xs mt-6 text-center font-bold">{cameraError}</p>}
+          {cameraError && <p className="text-red-400 text-xs mt-6 text-center font-bold px-4">{cameraError}</p>}
           <p className="text-white mt-10 text-sm font-bold tracking-widest">{scanField}をスキャン中</p>
-          <p className="text-white/40 text-[10px] mt-2">※明るい場所でバーコードに近づけてください</p>
+          <p className="text-white/40 text-[10px] mt-4 text-center px-6">
+            ※バーコードを枠の赤い線に合わせてください<br/>
+            ピントが合わない場合は少し離してみてください
+          </p>
         </div>
       )}
     </div>
