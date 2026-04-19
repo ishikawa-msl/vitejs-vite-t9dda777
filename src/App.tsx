@@ -12,7 +12,6 @@ const Icon = ({ name, size = 20, className = "" }: any) => {
     scan: (<><path d="M3 7V5a2 2 0 0 1 2-2h2" /><path d="M17 3h2a2 2 0 0 1 2 2v2" /><path d="M21 17v2a2 2 0 0 1-2 2h-2" /><path d="M7 21H5a2 2 0 0 1-2-2v-2" /></>),
     hash: (<><line x1="4" y1="9" x2="20" y2="9" /><line x1="4" y1="15" x2="20" y2="15" /><line x1="10" y1="3" x2="8" y2="21" /><line x1="16" y1="3" x2="14" y2="21" /></>),
     camera: (<><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></>),
-    refresh: (<><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></>),
     loader: (<><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></>),
   };
   return (
@@ -40,7 +39,6 @@ export default function App() {
   const SPREADSHEET_GAS_URL = "https://script.google.com/a/macros/mitsui-soko-lg.com/s/AKfycbxqABK9uxF_v12bwzQ5xo13MaYQzly_5C35y6TclY5M3P4p_9oH33QWreXmY3W4/exec"; 
 
   useEffect(() => {
-    // 外部スクリプトのロード
     const loadScripts = async () => {
       // html5-qrcode
       if (!document.getElementById('html5-qrcode-script')) {
@@ -56,16 +54,11 @@ export default function App() {
         tailwind.id = 'tailwind-script';
         tailwind.src = "https://cdn.tailwindcss.com";
         document.head.appendChild(tailwind);
-        
-        // Tailwindのロード完了を待つ
-        tailwind.onload = () => {
-          setTimeout(() => setIsReady(true), 500);
-        };
+        tailwind.onload = () => setTimeout(() => setIsReady(true), 500);
       } else {
         setIsReady(true);
       }
     };
-
     loadScripts();
   }, []);
 
@@ -77,19 +70,16 @@ export default function App() {
    * Gemini APIを使用した画像解析
    */
   const analyzeImageWithGemini = async (base64Data: string) => {
-    const systemPrompt = "あなたは物流倉庫の検品アシスタントです。提供された画像から、商品の『型番（モデル番号）』のみを抽出してください。余計な説明は省き、型番の文字列だけを返してください。判別できない場合は「読み取り不可」とだけ返してください。";
-    const userQuery = "この画像から型番を読み取ってください。";
+    const systemPrompt = "あなたは物流倉庫の検品プロフェッショナルです。画像から商品の『型番（Model Number）』または『モデル名』を特定してください。余計な文章（「型番は〜です」など）は一切不要です。見つかった文字列のみを返してください。判別できない場合は「読み取り不可」と返してください。";
     
     const payload = {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: userQuery },
-            { inlineData: { mimeType: "image/png", data: base64Data } }
-          ]
-        }
-      ],
+      contents: [{
+        role: "user",
+        parts: [
+          { text: "この画像から、パッケージや本体に記載されている型番を抽出してください。" },
+          { inlineData: { mimeType: "image/png", data: base64Data } }
+        ]
+      }],
       systemInstruction: { parts: [{ text: systemPrompt }] }
     };
 
@@ -102,13 +92,11 @@ export default function App() {
         });
         
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
-        
         const result = await response.json();
         return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "読み取り不可";
       } catch (error: any) {
-        if (retryCount < 5) {
-          const delay = Math.pow(2, retryCount) * 1000;
-          await new Promise(resolve => setTimeout(resolve, delay));
+        if (retryCount < 3) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
           return callApi(retryCount + 1);
         }
         throw error;
@@ -119,7 +107,7 @@ export default function App() {
   };
 
   /**
-   * 型番写真の解析実行
+   * 型番キャプチャ
    */
   const captureAndAnalyze = async () => {
     if (!videoRef.current || !canvasRef.current || isAnalyzing) return;
@@ -131,26 +119,26 @@ export default function App() {
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
-      if (video.videoWidth === 0) {
-        throw new Error("カメラ準備中...再度ボタンを押してください");
-      }
-
+      // 高画質でキャプチャするために元サイズを使用
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
-      ctx?.drawImage(video, 0, 0);
+      if (!ctx) throw new Error("描画エラー");
       
-      const base64Image = canvas.toDataURL('image/png').split(',')[1];
+      ctx.drawImage(video, 0, 0);
+      
+      // 画像圧縮率を下げて鮮明に
+      const base64Image = canvas.toDataURL('image/png', 1.0).split(',')[1];
       const detectedText = await analyzeImageWithGemini(base64Image);
       
       if (detectedText === "読み取り不可") {
-        setCameraError("AIが型番を判別できませんでした。ピントを合わせて撮り直してください。");
+        setCameraError("AIが文字を認識できませんでした。もっと近づけるか、明るい場所で撮ってください。");
       } else {
         updateField('model', detectedText);
         handleStopScan();
       }
     } catch (e: any) {
-      setCameraError(`解析エラー: ${e.message}`);
+      setCameraError(`エラー: 通信状態を確認してください`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -165,38 +153,27 @@ export default function App() {
       setTimeout(() => {
         // @ts-ignore
         if (typeof Html5Qrcode === 'undefined') {
-          setCameraError("システム準備中...5秒ほど待ってから再度お試しください");
+          setCameraError("ライブラリ読込中...");
           return;
         }
         try {
           // @ts-ignore
           const html5QrCode = new Html5Qrcode("reader");
           scannerRef.current = html5QrCode;
-
           const config = { 
-            fps: 20, 
-            qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-              const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-              const size = Math.floor(minEdge * 0.9);
-              return { width: size, height: Math.floor(size * 0.5) }; 
-            }
+            fps: 25, 
+            qrbox: (w: number, h: number) => ({ width: Math.floor(w * 0.9), height: Math.floor(h * 0.5) })
           };
-
-          html5QrCode.start(
-            { facingMode: "environment" }, 
-            config,
-            (decodedText: string) => {
-              updateField('jan', decodedText);
-              handleStopScan();
-            },
-            () => {} 
-          ).catch((err: any) => setCameraError("カメラ起動エラー: " + err));
+          html5QrCode.start({ facingMode: "environment" }, config, (text: string) => {
+            updateField('jan', text);
+            handleStopScan();
+          }, () => {}).catch(() => setCameraError("カメラを起動できません"));
         } catch (e) {
-          setCameraError("エラーが発生しました。");
+          setCameraError("システムエラー");
         }
       }, 800);
     } else {
-      // 型番 AIカメラ
+      // 型番 AIカメラ (高解像度リクエスト)
       setTimeout(async () => {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -207,7 +184,7 @@ export default function App() {
             scannerRef.current = stream; 
           }
         } catch (err: any) {
-          setCameraError("カメラへのアクセスを許可してください。");
+          setCameraError("カメラの使用を許可してください");
         }
       }, 500);
     }
@@ -215,10 +192,7 @@ export default function App() {
 
   const handleStopScan = () => {
     if (scannerRef.current && typeof scannerRef.current.stop === 'function') {
-      scannerRef.current.stop().then(() => {
-        setIsScanning(false);
-        scannerRef.current = null;
-      }).catch(() => {
+      scannerRef.current.stop().finally(() => {
         setIsScanning(false);
         scannerRef.current = null;
       });
@@ -238,7 +212,6 @@ export default function App() {
   const handleSave = async () => {
     if (isSaving) return;
     setIsSaving(true);
-    
     const payload = {
       date: new Date().toLocaleString('ja-JP'),
       orderId: formData.orderId,
@@ -259,7 +232,7 @@ export default function App() {
       alert("送信完了！");
       setFormData({ orderId: "", supplier: "", issues: [], otherNote: "", jan: "", model: "", quantity: "" });
     } catch (e) {
-      alert("送信エラーが発生しました。");
+      alert("送信エラー");
     } finally {
       setIsSaving(false);
     }
@@ -272,7 +245,6 @@ export default function App() {
     updateField('issues', issues);
   };
 
-  // チラツキ防止：ロード中画面
   if (!isReady) {
     return (
       <div className="fixed inset-0 bg-slate-50 flex flex-col items-center justify-center space-y-4">
@@ -292,25 +264,21 @@ export default function App() {
       </header>
 
       <main className="max-w-md mx-auto p-5 space-y-8 animate-in fade-in duration-500">
-        {/* 基本情報 */}
         <section className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-5">
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 tracking-wider">発注ID</label>
-            <input type="text" value={formData.orderId} onChange={(e)=>updateField('orderId', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none transition-all shadow-inner" placeholder="発注IDを入力" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 tracking-wider">仕入先名</label>
-            <input type="text" value={formData.supplier} onChange={(e)=>updateField('supplier', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none transition-all shadow-inner" placeholder="仕入先を入力" />
+            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 tracking-wider text-blue-600">発注情報</label>
+            <input type="text" value={formData.orderId} onChange={(e)=>updateField('orderId', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none transition-all shadow-inner" placeholder="発注ID" />
+            <input type="text" value={formData.supplier} onChange={(e)=>updateField('supplier', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none transition-all shadow-inner" placeholder="仕入先名" />
           </div>
         </section>
 
-        {/* スキャン */}
         <section className="space-y-3">
+          <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 tracking-wider text-blue-600">商品確認（スキャン）</label>
           {['JANコード', '型番'].map(f => (
             <div key={f} className="bg-white rounded-2xl border border-slate-200 p-4 flex justify-between items-center shadow-sm hover:border-blue-200 transition-all">
               <div className="flex-1 mr-4">
-                <p className="text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-tighter">{f}</p>
-                <input type="text" value={f === 'JANコード' ? formData.jan : formData.model} onChange={(e)=>updateField(f === 'JANコード' ? 'jan' : 'model', e.target.value)} className="text-sm font-bold w-full outline-none bg-transparent text-slate-800" placeholder={`${f}を入力`} />
+                <p className="text-[10px] font-bold text-slate-400 mb-1">{f}</p>
+                <input type="text" value={f === 'JANコード' ? formData.jan : formData.model} onChange={(e)=>updateField(f === 'JANコード' ? 'jan' : 'model', e.target.value)} className="text-sm font-bold w-full outline-none bg-transparent text-slate-800" placeholder={`${f}入力`} />
               </div>
               <button onClick={() => handleStartScan(f)} className="bg-blue-600 text-white px-3 py-2 rounded-xl text-[10px] font-bold shadow-md active:scale-95 transition-all flex items-center gap-1">
                 <Icon name={f === 'JANコード' ? "scan" : "camera"} size={14} /> {f === 'JANコード' ? "スキャン" : "AI読取"}
@@ -323,8 +291,8 @@ export default function App() {
           </div>
         </section>
 
-        {/* 不備内容 */}
         <section className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-4">
+          <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 tracking-wider text-blue-600">不備内容の選択</label>
           <div className="grid grid-cols-2 gap-2">
             {["数量違い", "破損", "納品書なし", "その他"].map(l => (
               <button key={l} onClick={() => toggleIssue(l)} className={`p-3 rounded-2xl border text-[11px] font-bold transition-all ${formData.issues.includes(l) ? "bg-blue-600 text-white border-blue-600 shadow-inner" : "bg-slate-50 text-slate-600 border-slate-100"}`}>{l}</button>
@@ -366,8 +334,8 @@ export default function App() {
             {isAnalyzing && (
               <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center backdrop-blur-sm">
                 <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-6"></div>
-                <p className="text-white text-lg font-black tracking-widest animate-pulse uppercase">AI Analyzing...</p>
-                <p className="text-white/60 text-xs mt-2">文字を解析しています。動かさないでください</p>
+                <p className="text-white text-lg font-black tracking-widest animate-pulse uppercase italic">Analysing Text...</p>
+                <p className="text-white/60 text-xs mt-2 text-center px-6">AIが文字を抽出しています。<br/>そのまま数秒お待ちください</p>
               </div>
             )}
           </div>
@@ -387,12 +355,17 @@ export default function App() {
             </p>
 
             {scanField === "型番" && !isAnalyzing && (
-              <button 
-                onClick={captureAndAnalyze}
-                className="bg-white text-slate-900 px-10 py-5 rounded-full font-black shadow-2xl active:scale-95 transition-all flex items-center gap-3 border-4 border-blue-500/20"
-              >
-                <Icon name="camera" size={24} /> 文字を読み取る
-              </button>
+              <div className="flex flex-col items-center gap-6">
+                <button 
+                  onClick={captureAndAnalyze}
+                  className="bg-white text-slate-900 px-12 py-5 rounded-full font-black shadow-2xl active:scale-95 transition-all flex items-center gap-3 border-4 border-blue-500/20"
+                >
+                  <Icon name="camera" size={24} /> 文字を読み取る
+                </button>
+                <p className="text-white/50 text-[11px] text-center px-8">
+                  ※型番の文字が赤い枠の範囲に収まるようにして<br/>ボタンを押してください。
+                </p>
+              </div>
             )}
 
             <button 
