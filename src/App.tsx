@@ -40,15 +40,12 @@ export default function App() {
 
   useEffect(() => {
     const loadScripts = async () => {
-      // html5-qrcode
       if (!document.getElementById('html5-qrcode-script')) {
         const script = document.createElement('script');
         script.id = 'html5-qrcode-script';
         script.src = "https://unpkg.com/html5-qrcode";
         document.body.appendChild(script);
       }
-
-      // Tailwind
       if (!document.getElementById('tailwind-script')) {
         const tailwind = document.createElement('script');
         tailwind.id = 'tailwind-script';
@@ -66,17 +63,14 @@ export default function App() {
     setFormData((prev: any) => ({ ...prev, [field]: value }));
   };
 
-  /**
-   * Gemini APIを使用した画像解析
-   */
   const analyzeImageWithGemini = async (base64Data: string) => {
-    const systemPrompt = "あなたは物流倉庫の検品プロフェッショナルです。画像から商品の『型番（Model Number）』または『モデル名』を特定してください。余計な文章（「型番は〜です」など）は一切不要です。見つかった文字列のみを返してください。判別できない場合は「読み取り不可」と返してください。";
+    const systemPrompt = "あなたは物流倉庫の検品プロフェッショナルです。送られた画像（クロップ済み）から、商品の『型番（Model Number）』のみを抽出してください。余計な説明は省き、型番の文字列だけを返してください。判別できない場合は「読み取り不可」と返してください。";
     
     const payload = {
       contents: [{
         role: "user",
         parts: [
-          { text: "この画像から、パッケージや本体に記載されている型番を抽出してください。" },
+          { text: "この画像の中心に写っている型番を抽出してください。" },
           { inlineData: { mimeType: "image/png", data: base64Data } }
         ]
       }],
@@ -90,7 +84,6 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        
         if (!response.ok) throw new Error(`API Error: ${response.status}`);
         const result = await response.json();
         return result.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "読み取り不可";
@@ -102,16 +95,11 @@ export default function App() {
         throw error;
       }
     };
-
     return await callApi();
   };
 
-  /**
-   * 型番キャプチャ
-   */
   const captureAndAnalyze = async () => {
     if (!videoRef.current || !canvasRef.current || isAnalyzing) return;
-    
     setIsAnalyzing(true);
     setCameraError("");
 
@@ -119,15 +107,21 @@ export default function App() {
       const video = videoRef.current;
       const canvas = canvasRef.current;
 
-      // 高画質でキャプチャするために元サイズを使用
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      // 画面上の枠の比率に合わせる (w:90%, h:30%)
+      const boxW = video.videoWidth * 0.9;
+      const boxH = video.videoHeight * 0.3; // 以前の0.6から0.3へ（さらに狭く）
+      const startX = (video.videoWidth - boxW) / 2;
+      const startY = (video.videoHeight - boxH) / 2;
+
+      // 切り抜いた後のサイズをCanvasに設定
+      canvas.width = boxW;
+      canvas.height = boxH;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error("描画エラー");
       
-      ctx.drawImage(video, 0, 0);
+      // ビデオの特定エリア（枠の中）だけをCanvasに描画
+      ctx.drawImage(video, startX, startY, boxW, boxH, 0, 0, boxW, boxH);
       
-      // 画像圧縮率を下げて鮮明に
       const base64Image = canvas.toDataURL('image/png', 1.0).split(',')[1];
       const detectedText = await analyzeImageWithGemini(base64Image);
       
@@ -173,7 +167,6 @@ export default function App() {
         }
       }, 800);
     } else {
-      // 型番 AIカメラ (高解像度リクエスト)
       setTimeout(async () => {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -222,7 +215,6 @@ export default function App() {
       qty_actual: formData.quantity,
       note: formData.otherNote
     };
-
     try {
       await fetch(SPREADSHEET_GAS_URL, {
         method: 'POST', mode: 'no-cors',
@@ -324,9 +316,9 @@ export default function App() {
               <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover"></video>
             )}
             
-            {/* 視覚ガイド */}
+            {/* 視覚ガイド: 型番の時は枠を細くする */}
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-               <div className={`w-[90%] h-[60%] border-4 border-blue-500 shadow-[0_0_40px_rgba(59,130,246,0.6)] relative rounded-xl bg-blue-500/5 transition-all`}>
+               <div className={`w-[90%] ${scanField === "型番" ? "h-[30%]" : "h-[60%]"} border-4 border-blue-500 shadow-[0_0_40px_rgba(59,130,246,0.6)] relative rounded-xl bg-blue-500/5 transition-all`}>
                  <div className="absolute top-1/2 left-0 w-full h-2 bg-red-600 shadow-[0_0_20px_rgba(220,38,38,1)] animate-pulse -translate-y-1/2"></div>
                </div>
             </div>
@@ -335,25 +327,22 @@ export default function App() {
               <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center backdrop-blur-sm">
                 <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-6"></div>
                 <p className="text-white text-lg font-black tracking-widest animate-pulse uppercase italic">Analysing Text...</p>
-                <p className="text-white/60 text-xs mt-2 text-center px-6">AIが文字を抽出しています。<br/>そのまま数秒お待ちください</p>
+                <p className="text-white/60 text-xs mt-2 text-center px-6">枠内の文字を抽出しています。<br/>そのままお待ちください</p>
               </div>
             )}
           </div>
 
           <canvas ref={canvasRef} className="hidden"></canvas>
-
           {cameraError && (
             <div className="mt-6 bg-red-500/20 border border-red-500/50 p-4 rounded-2xl max-w-sm mx-auto">
               <p className="text-red-400 text-xs text-center font-bold">{cameraError}</p>
             </div>
           )}
-          
           <div className="mt-8 flex flex-col items-center gap-4">
             <p className="text-white text-sm font-bold tracking-widest uppercase flex items-center gap-2">
               <span className="w-2 h-2 bg-red-500 rounded-full animate-ping"></span>
               {scanField}読取中
             </p>
-
             {scanField === "型番" && !isAnalyzing && (
               <div className="flex flex-col items-center gap-6">
                 <button 
@@ -363,17 +352,11 @@ export default function App() {
                   <Icon name="camera" size={24} /> 文字を読み取る
                 </button>
                 <p className="text-white/50 text-[11px] text-center px-8">
-                  ※型番の文字が赤い枠の範囲に収まるようにして<br/>ボタンを押してください。
+                  ※型番の文字が青い枠の中に収まるようにして<br/>ボタンを押してください。
                 </p>
               </div>
             )}
-
-            <button 
-              onClick={handleStopScan}
-              className="text-white/40 text-xs underline mt-4"
-            >
-              スキャンを終了する
-            </button>
+            <button onClick={handleStopScan} className="text-white/40 text-xs underline mt-4">スキャンを終了する</button>
           </div>
         </div>
       )}
