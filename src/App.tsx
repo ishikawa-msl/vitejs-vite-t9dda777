@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 
 /**
- * アイコンコンポーネント (SVG版)
+ * アイコンコンポーネント (SVG)
  */
 const Icon = ({ name, size = 20, className = "" }: any) => {
   const icons: any = {
@@ -11,7 +11,6 @@ const Icon = ({ name, size = 20, className = "" }: any) => {
     save: (<><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /></>),
     scan: (<><path d="M3 7V5a2 2 0 0 1 2-2h2" /><path d="M17 3h2a2 2 0 0 1 2 2v2" /><path d="M21 17v2a2 2 0 0 1-2 2h-2" /><path d="M7 21H5a2 2 0 0 1-2-2v-2" /></>),
     hash: (<><line x1="4" y1="9" x2="20" y2="9" /><line x1="4" y1="15" x2="20" y2="15" /><line x1="10" y1="3" x2="8" y2="21" /><line x1="16" y1="3" x2="14" y2="21" /></>),
-    check: <polyline points="20 6 9 17 4 12" />,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -30,19 +29,19 @@ export default function App() {
   const [cameraError, setCameraError] = useState("");
   const scannerRef = useRef<any>(null);
 
-  // あなたのGAS URL
   const SPREADSHEET_GAS_URL = "https://script.google.com/a/macros/mitsui-soko-lg.com/s/AKfycbxqABK9uxF_v12bwzQ5xo13MaYQzly_5C35y6TclY5M3P4p_9oH33QWreXmY3W4/exec"; 
 
-  // スキャンライブラリ & Tailwind CSS の読み込み
   useEffect(() => {
+    // スキャンライブラリの読み込み
     const script = document.createElement('script');
     script.src = "https://unpkg.com/html5-qrcode";
     script.async = true;
     document.body.appendChild(script);
 
-    const styleLink = document.createElement('script');
-    styleLink.src = "https://cdn.tailwindcss.com";
-    document.head.appendChild(styleLink);
+    // Tailwind CSS の読み込み
+    const tailwind = document.createElement('script');
+    tailwind.src = "https://cdn.tailwindcss.com";
+    document.head.appendChild(tailwind);
   }, []);
 
   const updateField = (field: string, value: any) => {
@@ -57,7 +56,7 @@ export default function App() {
     setTimeout(() => {
       // @ts-ignore
       if (typeof Html5Qrcode === 'undefined') {
-        setCameraError("ライブラリを読み込み中です。");
+        setCameraError("システム準備中...もう一度押してください");
         return;
       }
       try {
@@ -65,19 +64,16 @@ export default function App() {
         const html5QrCode = new Html5Qrcode("reader");
         scannerRef.current = html5QrCode;
 
-        // バーコード（特にJAN）を読み取りやすくするための設定
         const config = { 
-          fps: 15, // 1秒あたりの解析回数
+          fps: 15, 
           qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-            // 画面サイズに合わせて最適な読取エリアを計算
             const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-            const qrboxSize = Math.floor(minEdge * 0.7);
-            return {
-              width: qrboxSize,
-              height: Math.floor(qrboxSize * 0.5) // バーコード用に横長にする
-            };
-          },
-          aspectRatio: 1.0 
+            const size = Math.floor(minEdge * 0.9); // スキャン枠を最大化
+            return { 
+              width: size, 
+              height: Math.floor(size * 0.6) // バーコードが見やすい比率
+            }; 
+          }
         };
 
         html5QrCode.start(
@@ -89,12 +85,9 @@ export default function App() {
             handleStopScan();
           },
           () => {} 
-        ).catch((err: any) => {
-          setCameraError("カメラ起動エラー: " + err);
-          console.error(err);
-        });
+        ).catch((err: any) => setCameraError("カメラ起動エラー: " + err));
       } catch (e) {
-        setCameraError("システムエラー: " + e);
+        setCameraError("エラーが発生しました");
       }
     }, 500);
   };
@@ -104,17 +97,14 @@ export default function App() {
       scannerRef.current.stop().then(() => {
         setIsScanning(false);
         scannerRef.current = null;
-      }).catch((err: any) => {
-        console.error("Stop error", err);
-        setIsScanning(false);
-      });
+      }).catch(() => setIsScanning(false));
     } else {
       setIsScanning(false);
     }
   };
 
   const handleSave = async () => {
-    if (!SPREADSHEET_GAS_URL) return alert("URLが設定されていません。");
+    if (isSaving) return;
     setIsSaving(true);
     
     const payload = {
@@ -130,15 +120,14 @@ export default function App() {
 
     try {
       await fetch(SPREADSHEET_GAS_URL, {
-        method: 'POST',
-        mode: 'no-cors',
+        method: 'POST', mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      alert("送信完了！");
+      alert("送信完了！スプレッドシートをご確認ください。");
       setFormData({ orderId: "", supplier: "", issues: [], otherNote: "", jan: "", model: "", quantity: "" });
     } catch (e) {
-      alert("送信エラー");
+      alert("送信エラーが発生しました。");
     } finally {
       setIsSaving(false);
     }
@@ -152,81 +141,92 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-40 font-sans overflow-x-hidden">
-      <header className="bg-white border-b p-4 sticky top-0 z-30 shadow-sm flex items-center gap-2">
-        <div className="bg-blue-600 p-1.5 rounded-lg">
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-40 font-sans overflow-x-hidden relative">
+      <header className="bg-white border-b border-slate-200 p-4 sticky top-0 z-30 shadow-sm flex items-center gap-2">
+        <div className="bg-blue-600 p-1.5 rounded-lg shadow-lg">
           <Icon name="fileText" size={20} className="text-white" />
         </div>
-        <h1 className="text-lg font-bold">入荷問い合わせ</h1>
+        <h1 className="text-lg font-bold tracking-tight text-slate-800">入荷問い合わせシステム</h1>
       </header>
 
       <main className="max-w-md mx-auto p-5 space-y-8 animate-in fade-in duration-500">
-        <section className="space-y-4">
-          <div className="bg-white rounded-3xl p-6 shadow-sm border space-y-5">
-            <input type="text" value={formData.orderId} onChange={(e)=>updateField('orderId', e.target.value)} className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none" placeholder="発注ID" />
-            <input type="text" value={formData.supplier} onChange={(e)=>updateField('supplier', e.target.value)} className="w-full bg-slate-50 border rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none" placeholder="仕入先名" />
+        <section className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-5">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 tracking-wider">発注ID</label>
+            <input type="text" value={formData.orderId} onChange={(e)=>updateField('orderId', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none transition-all shadow-inner" placeholder="発注IDを入力" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 tracking-wider">仕入先名</label>
+            <input type="text" value={formData.supplier} onChange={(e)=>updateField('supplier', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:border-blue-500 outline-none transition-all shadow-inner" placeholder="仕入先を入力" />
           </div>
         </section>
 
         <section className="space-y-3">
           {['JANコード', '型番'].map(f => (
-            <div key={f} className="bg-white rounded-2xl border p-4 flex justify-between items-center shadow-sm">
+            <div key={f} className="bg-white rounded-2xl border border-slate-200 p-4 flex justify-between items-center shadow-sm hover:border-blue-200 transition-all">
               <div className="flex-1 mr-4">
-                <p className="text-[10px] font-bold text-slate-400 mb-1">{f}</p>
-                <input type="text" value={f === 'JANコード' ? formData.jan : formData.model} onChange={(e)=>updateField(f === 'JANコード' ? 'jan' : 'model', e.target.value)} className="text-sm font-bold w-full bg-transparent outline-none" placeholder="未入力" />
+                <p className="text-[10px] font-bold text-slate-400 mb-1 uppercase tracking-tighter">{f}</p>
+                <input type="text" value={f === 'JANコード' ? formData.jan : formData.model} onChange={(e)=>updateField(f === 'JANコード' ? 'jan' : 'model', e.target.value)} className="text-sm font-bold w-full outline-none bg-transparent text-slate-800" placeholder={`${f}を入力`} />
               </div>
-              <button onClick={() => handleStartScan(f)} className="bg-blue-600 text-white px-3 py-2 rounded-xl text-[10px] font-bold shadow-md active:scale-95 flex items-center gap-1">
-                <Icon name="scan" size={12} /> スキャン
+              <button onClick={() => handleStartScan(f)} className="bg-blue-600 text-white px-3 py-2 rounded-xl text-[10px] font-bold shadow-md active:scale-95 transition-all flex items-center gap-1">
+                <Icon name="scan" size={14} /> スキャン
               </button>
             </div>
           ))}
-          <div className="bg-blue-50 rounded-2xl border border-blue-200 p-4 flex justify-between items-center text-blue-700 shadow-sm">
-             <div className="flex items-center gap-2"><Icon name="hash" size={16} /><span className="text-xs font-bold">実数量</span></div>
-             <input type="number" inputMode="numeric" value={formData.quantity} onChange={(e)=>updateField('quantity', e.target.value)} className="w-20 bg-white border border-blue-300 rounded text-center font-bold py-1" />
+          <div className="bg-blue-50/50 rounded-2xl border border-blue-200 p-4 flex justify-between items-center text-blue-700 shadow-sm">
+             <div className="flex items-center gap-2 font-bold text-xs"><Icon name="hash" size={16} /> 実商品の数量</div>
+             <input type="number" inputMode="numeric" value={formData.quantity} onChange={(e)=>updateField('quantity', e.target.value)} className="w-20 bg-white border border-blue-300 rounded-lg text-center font-bold py-2 text-lg shadow-inner outline-none" placeholder="0" />
           </div>
         </section>
 
-        <section className="bg-white rounded-3xl p-5 border shadow-sm space-y-4">
+        <section className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm space-y-4">
           <div className="grid grid-cols-2 gap-2">
             {["数量違い", "破損", "納品書なし", "その他"].map(l => (
-              <button key={l} onClick={() => toggleIssue(l)} className={`p-3 rounded-2xl border text-[11px] font-bold transition-all ${formData.issues.includes(l) ? "bg-blue-600 text-white border-blue-600" : "bg-slate-50 text-slate-600 border-slate-100"}`}>{l}</button>
+              <button key={l} onClick={() => toggleIssue(l)} className={`p-3 rounded-2xl border text-[11px] font-bold transition-all ${formData.issues.includes(l) ? "bg-blue-600 text-white border-blue-600 shadow-inner" : "bg-slate-50 text-slate-600 border-slate-100"}`}>{l}</button>
             ))}
           </div>
           {formData.issues.includes("その他") && (
-            <textarea value={formData.otherNote} onChange={(e)=>updateField('otherNote', e.target.value)} className="w-full bg-slate-50 border rounded-2xl p-4 text-sm h-24 outline-none focus:bg-white transition-colors" placeholder="詳細入力" />
+            <textarea value={formData.otherNote} onChange={(e)=>updateField('otherNote', e.target.value)} className="w-full mt-2 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm h-32 outline-none focus:bg-white shadow-inner resize-none transition-all text-slate-800" placeholder="不備の詳細を自由に入力してください" />
           )}
         </section>
 
-        <div className="fixed bottom-10 left-0 right-0 p-5 bg-gradient-to-t from-slate-50 flex justify-center z-20 pointer-events-none">
-          <button onClick={handleSave} disabled={isSaving} className={`bg-blue-600 max-w-md w-full py-5 rounded-2xl font-bold text-white shadow-xl pointer-events-auto active:scale-95 transition-transform ${isSaving ? 'opacity-50' : ''}`}>
-            {isSaving ? "送信中..." : "保存して報告を送信"}
+        <div className="fixed bottom-10 left-0 right-0 p-5 bg-gradient-to-t from-slate-50 via-slate-50 to-transparent flex justify-center z-20 pointer-events-none">
+          <button onClick={handleSave} disabled={isSaving} className={`bg-blue-600 max-w-md w-full py-5 rounded-2xl font-bold text-white shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3 pointer-events-auto ${isSaving ? 'opacity-50' : ''}`}>
+            {isSaving ? "送信中..." : <><Icon name="save" size={22} /> 保存して報告を送信</>}
           </button>
         </div>
       </main>
 
-      {/* スキャン画面 */}
+      {/* スキャン画面モーダル */}
       {isScanning && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center p-4 animate-in fade-in duration-300">
           <div className="absolute top-8 right-8 z-50">
-             <button onClick={handleStopScan} className="bg-white/20 p-2 rounded-full text-white"><Icon name="x" size={32} /></button>
+             <button onClick={handleStopScan} className="bg-white/20 p-2 rounded-full text-white hover:bg-white/40"><Icon name="x" size={32} /></button>
           </div>
           <div className="relative w-full max-w-sm aspect-square bg-zinc-900 rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl flex items-center justify-center">
-            {/* スキャンエンジン表示エリア */}
             <div id="reader" className="w-full h-full"></div>
-            
-            {/* 解析範囲を示すオーバーレイガイド（実際の読取エリアに合わせる） */}
+            {/* 視覚ガイド: 枠を太く、赤線を超太く(h-2)設定 */}
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-               <div className="w-[70%] h-[35%] border-2 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.6)] relative rounded-md bg-blue-500/5">
-                 {/* スキャンアニメーション線 */}
-                 <div className="absolute top-1/2 left-0 w-full h-0.5 bg-red-500 shadow-[0_0_10px_rgba(239,68,68,1)] animate-pulse"></div>
+               <div className="w-[90%] h-[60%] border-4 border-blue-500 shadow-[0_0_40px_rgba(59,130,246,0.6)] relative rounded-xl bg-blue-500/5 transition-all">
+                 {/* 超太くなった赤いスキャン線 */}
+                 <div className="absolute top-1/2 left-0 w-full h-2 bg-red-600 shadow-[0_0_20px_rgba(220,38,38,1)] animate-pulse -translate-y-1/2"></div>
+                 
+                 {/* コーナー装飾 */}
+                 <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-blue-400 rounded-tl-sm"></div>
+                 <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-blue-400 rounded-tr-sm"></div>
+                 <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-blue-400 rounded-bl-sm"></div>
+                 <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-blue-400 rounded-br-sm"></div>
                </div>
             </div>
           </div>
-          {cameraError && <p className="text-red-400 text-xs mt-6 text-center font-bold px-4">{cameraError}</p>}
-          <p className="text-white mt-10 text-sm font-bold tracking-widest">{scanField}をスキャン中</p>
-          <p className="text-white/40 text-[10px] mt-4 text-center px-6">
-            ※バーコードを枠の赤い線に合わせてください<br/>
-            ピントが合わない場合は少し離してみてください
+          {cameraError && <p className="text-red-400 text-xs mt-6 px-4 text-center font-bold">{cameraError}</p>}
+          <p className="text-white mt-10 text-sm font-bold tracking-widest uppercase flex items-center gap-2">
+            <span className="w-2 h-2 bg-red-500 rounded-full animate-ping"></span>
+            {scanField}スキャン中
+          </p>
+          <p className="text-white/40 text-[10px] mt-4 text-center px-6 leading-relaxed">
+            太い赤線にバーコードを重ねてください。<br/>
+            ピントが合わない場合はゆっくり離してみてください。
           </p>
         </div>
       )}
