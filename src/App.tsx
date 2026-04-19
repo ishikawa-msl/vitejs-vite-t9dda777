@@ -64,16 +64,27 @@ export default function App() {
         // @ts-ignore
         const html5QrCode = new Html5Qrcode("reader");
         scannerRef.current = html5QrCode;
+
+        // 読み取りたいフォーマット（JANコード = EAN_13）を明示的に指定
+        const config = { 
+          fps: 15, 
+          qrbox: { width: 280, height: 160 },
+          aspectRatio: 1.0 
+        };
+
         html5QrCode.start(
           { facingMode: "environment" }, 
-          { fps: 10, qrbox: { width: 250, height: 150 } },
+          config,
           (decodedText: string) => {
             if (field === "JANコード") updateField('jan', decodedText);
             else updateField('model', decodedText);
             handleStopScan();
           },
           () => {} 
-        ).catch((err: any) => setCameraError("カメラ起動エラー: " + err));
+        ).catch((err: any) => {
+          setCameraError("カメラ起動エラー: " + err);
+          console.error(err);
+        });
       } catch (e) {
         setCameraError("システムエラー: " + e);
       }
@@ -82,9 +93,12 @@ export default function App() {
 
   const handleStopScan = () => {
     if (scannerRef.current) {
-      scannerRef.current.stop().finally(() => {
+      scannerRef.current.stop().then(() => {
         setIsScanning(false);
         scannerRef.current = null;
+      }).catch((err: any) => {
+        console.error("Stop error", err);
+        setIsScanning(false);
       });
     } else {
       setIsScanning(false);
@@ -153,7 +167,7 @@ export default function App() {
                 <p className="text-[10px] font-bold text-slate-400 mb-1">{f}</p>
                 <input type="text" value={f === 'JANコード' ? formData.jan : formData.model} onChange={(e)=>updateField(f === 'JANコード' ? 'jan' : 'model', e.target.value)} className="text-sm font-bold w-full bg-transparent outline-none" placeholder="未入力" />
               </div>
-              <button onClick={() => handleStartScan(f)} className="bg-blue-600 text-white px-3 py-2 rounded-xl text-[10px] font-bold">スキャン</button>
+              <button onClick={() => handleStartScan(f)} className="bg-blue-600 text-white px-3 py-2 rounded-xl text-[10px] font-bold shadow-md">スキャン</button>
             </div>
           ))}
           <div className="bg-blue-50 rounded-2xl border border-blue-200 p-4 flex justify-between items-center text-blue-700 shadow-sm">
@@ -165,16 +179,16 @@ export default function App() {
         <section className="bg-white rounded-3xl p-5 border shadow-sm space-y-4">
           <div className="grid grid-cols-2 gap-2">
             {["数量違い", "破損", "納品書なし", "その他"].map(l => (
-              <button key={l} onClick={() => toggleIssue(l)} className={`p-3 rounded-2xl border text-[11px] font-bold ${formData.issues.includes(l) ? "bg-blue-600 text-white" : "bg-slate-50 text-slate-600"}`}>{l}</button>
+              <button key={l} onClick={() => toggleIssue(l)} className={`p-3 rounded-2xl border text-[11px] font-bold transition-all ${formData.issues.includes(l) ? "bg-blue-600 text-white border-blue-600" : "bg-slate-50 text-slate-600 border-slate-100"}`}>{l}</button>
             ))}
           </div>
           {formData.issues.includes("その他") && (
-            <textarea value={formData.otherNote} onChange={(e)=>updateField('otherNote', e.target.value)} className="w-full bg-slate-50 border rounded-2xl p-4 text-sm h-24 outline-none" placeholder="詳細入力" />
+            <textarea value={formData.otherNote} onChange={(e)=>updateField('otherNote', e.target.value)} className="w-full bg-slate-50 border rounded-2xl p-4 text-sm h-24 outline-none focus:bg-white transition-colors" placeholder="詳細入力" />
           )}
         </section>
 
         <div className="fixed bottom-10 left-0 right-0 p-5 bg-gradient-to-t from-slate-50 flex justify-center z-20 pointer-events-none">
-          <button onClick={handleSave} disabled={isSaving} className={`bg-blue-600 max-w-md w-full py-5 rounded-2xl font-bold text-white shadow-xl pointer-events-auto ${isSaving ? 'opacity-50' : ''}`}>
+          <button onClick={handleSave} disabled={isSaving} className={`bg-blue-600 max-w-md w-full py-5 rounded-2xl font-bold text-white shadow-xl pointer-events-auto active:scale-95 transition-transform ${isSaving ? 'opacity-50' : ''}`}>
             {isSaving ? "送信中..." : "保存して報告を送信"}
           </button>
         </div>
@@ -185,9 +199,18 @@ export default function App() {
           <div className="absolute top-8 right-8 z-50">
              <button onClick={handleStopScan} className="bg-white/20 p-2 rounded-full text-white"><Icon name="x" size={32} /></button>
           </div>
-          <div id="reader" className="w-full max-w-sm overflow-hidden rounded-2xl bg-zinc-900 border-2 border-white/20 aspect-square"></div>
-          {cameraError && <p className="text-red-400 text-xs mt-6 text-center">{cameraError}</p>}
-          <p className="text-white mt-10 text-sm font-bold tracking-widest">{scanField}スキャン中</p>
+          <div className="relative w-full max-w-sm aspect-square bg-zinc-900 rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl">
+            <div id="reader" className="w-full h-full"></div>
+            {/* 読み取りガイドの枠 */}
+            <div className="absolute inset-0 pointer-events-none border-[60px] border-black/40 flex items-center justify-center">
+               <div className="w-full h-full border-2 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)] relative">
+                 <div className="absolute top-1/2 left-0 w-full h-0.5 bg-red-500 animate-pulse"></div>
+               </div>
+            </div>
+          </div>
+          {cameraError && <p className="text-red-400 text-xs mt-6 text-center font-bold">{cameraError}</p>}
+          <p className="text-white mt-10 text-sm font-bold tracking-widest">{scanField}をスキャン中</p>
+          <p className="text-white/40 text-[10px] mt-2">※明るい場所でバーコードに近づけてください</p>
         </div>
       )}
     </div>
